@@ -1,0 +1,5 @@
+
+product_id,current_stock,lead_time_days,on_order,backorders
+P001,120,5,20,0
+P002,80,7,0,5
+P003,50,4,10,0
