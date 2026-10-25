@@ -1,5 +1,6 @@
 
 from pathlib import Path
+from io import BytesIO
 
 import pandas as pd
 import plotly.express as px
@@ -7,7 +8,7 @@ import streamlit as st
 
 
 # ============================================================
-# 1. PAGE CONFIGURATION AND CREATIVE THEME
+# 1. PAGE CONFIGURATION AND THEME
 # ============================================================
 
 st.set_page_config(
@@ -91,7 +92,6 @@ st.markdown(
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
-
 DEMO_PATH = BASE_DIR / "data" / "raw" / "retail_demand.csv"
 
 REQUIRED_FIELDS = ["date", "product_id", "units_sold"]
@@ -136,22 +136,18 @@ COLUMN_ALIASES = {
 # ============================================================
 
 def read_uploaded_file(uploaded_file):
-    """Read CSV or Excel data without changing the uploaded file."""
+    """Read uploaded CSV or Excel files."""
 
     filename = uploaded_file.name.lower()
 
     if filename.endswith(".csv"):
         return pd.read_csv(uploaded_file)
 
-    if filename.endswith((".xlsx", ".xls")):
-        try:
-            return pd.read_excel(uploaded_file)
-        except ImportError as exc:
-            raise ValueError(
-                "Excel support requires an Excel reader package. "
-                "For .xlsx files, run: "
-                "python -m pip install openpyxl"
-            ) from exc
+    if filename.endswith(".xlsx"):
+        return pd.read_excel(uploaded_file, engine="openpyxl")
+
+    if filename.endswith(".xls"):
+        return pd.read_excel(uploaded_file)
 
     raise ValueError("Please upload a CSV, XLSX, or XLS file.")
 
@@ -168,18 +164,17 @@ def load_demo_data():
 
 
 # ============================================================
-# 4. AUTOMATIC AND MANUAL COLUMN MAPPING
+# 4. COLUMN MAPPING
 # ============================================================
 
-
 def suggest_column(columns, field):
-    """Suggest a source column using normalized column names."""
+    """Suggest matching columns based on normalized names."""
 
     def normalize(value):
         return "".join(
-            character
-            for character in str(value).strip().lower()
-            if character.isalnum()
+            char
+            for char in str(value).strip().lower()
+            if char.isalnum()
         )
 
     lookup = {
@@ -196,9 +191,8 @@ def suggest_column(columns, field):
     return None
 
 
-
 def map_columns(df, mapping):
-    """Create a standardized dataset using selected source columns."""
+    """Standardize selected source columns."""
 
     output = pd.DataFrame(index=df.index)
 
@@ -214,7 +208,7 @@ def map_columns(df, mapping):
 # ============================================================
 
 def validate_data(df):
-    """Return a transparent summary of data-quality issues."""
+    """Identify common data-quality problems."""
 
     missing_columns = [
         column
@@ -235,17 +229,15 @@ def validate_data(df):
     products = df["product_id"].astype("string").str.strip()
     demand = pd.to_numeric(df["units_sold"], errors="coerce")
 
-    nonblank_products = products.fillna("").ne("")
-
     temp = pd.DataFrame({
         "_date": dates,
         "_product": products,
     })
 
-    valid_key_rows = temp["_date"].notna() & temp["_product"].notna()
+    valid_keys = temp["_date"].notna() & temp["_product"].notna()
 
     duplicate_count = int(
-        temp.loc[valid_key_rows].duplicated(
+        temp.loc[valid_keys].duplicated(
             ["_date", "_product"]
         ).sum()
     )
@@ -263,8 +255,8 @@ def validate_data(df):
         ),
         (
             "Blank product IDs",
-            int((products.notna() & ~nonblank_products).sum()),
-            "Rows with an empty product identifier",
+            int((products.notna() & products.eq("")).sum()),
+            "Rows with empty product identifiers",
         ),
         (
             "Invalid demand",
@@ -294,7 +286,7 @@ def validate_data(df):
 
 
 def prepare_demand_data(df):
-    """Clean a working copy for demand analysis."""
+    """Clean demand data and aggregate duplicate product/date rows."""
 
     missing = [
         column
@@ -329,8 +321,6 @@ def prepare_demand_data(df):
         & (data["units_sold"] >= 0)
     ].copy()
 
-    # Aggregate duplicate records to one demand value per
-    # product and date, matching the existing project structure.
     data = data.groupby(
         ["date", "product_id"],
         as_index=False,
@@ -348,18 +338,13 @@ def prepare_demand_data(df):
 def render_landing_page():
     st.markdown(
         """
-        <div style="
-            padding: 26px 4px 18px 4px;
-            border-radius: 20px;
-        ">
+        <div style="padding: 26px 4px 18px 4px;">
             <p style="
                 color: #60A5FA;
                 font-weight: 700;
                 letter-spacing: 3px;
                 font-size: 14px;
-            ">
-                DEMANDPILOT AI
-            </p>
+            ">DEMANDPILOT AI</p>
 
             <h1 style="
                 font-size: clamp(34px, 5vw, 54px);
@@ -376,9 +361,8 @@ def render_landing_page():
                 max-width: 760px;
                 line-height: 1.7;
             ">
-                Explore demand patterns, compare forecasts,
-                and make inventory decisions using transparent
-                calculations and your own data.
+                Explore demand patterns, analyze products,
+                and make inventory decisions using your data.
             </p>
         </div>
         """,
@@ -393,7 +377,6 @@ def render_landing_page():
             type="primary",
             width="stretch",
         ):
-            st.session_state["page"] = "Demand Overview"
             st.session_state["launched"] = True
             st.rerun()
 
@@ -402,9 +385,8 @@ def render_landing_page():
             "📊 Explore Demo",
             width="stretch",
         ):
-            st.session_state["use_demo"] = True
-            st.session_state["page"] = "Demand Overview"
             st.session_state["launched"] = True
+            st.session_state["use_demo"] = True
             st.rerun()
 
     st.divider()
@@ -413,47 +395,25 @@ def render_landing_page():
 
     with c1:
         st.markdown("### 📈 Forecasting")
-        st.write(
-            "Explore historical demand and prepare for "
-            "forecast evaluation."
-        )
+        st.write("Explore historical demand patterns.")
 
     with c2:
         st.markdown("### 📦 Inventory")
-        st.write(
-            "Review inventory inputs and transparent "
-            "replenishment calculations."
-        )
+        st.write("Review product demand for inventory planning.")
 
     with c3:
         st.markdown("### 🔍 Data Quality")
-        st.write(
-            "Inspect missing values, invalid records, "
-            "and duplicate observations."
-        )
+        st.write("Inspect invalid records and data-quality issues.")
 
     st.info(
-        "Start with the bundled demo dataset or upload your own. "
-        "Demonstration inventory values are examples, not "
-        "verified business stock records."
+        "Upload your own dataset or use the bundled demo dataset. "
+        "Demo data does not represent verified business inventory."
     )
 
 
 # ============================================================
-# 7. SESSION STATE AND SIDEBAR
+# 7. SESSION STATE
 # ============================================================
-
-PAGES = [
-    "Home",
-    "Demand Overview",
-    "Demand Forecasting",
-    "Inventory Intelligence",
-    "Model Performance",
-    "Data Quality & Insights",
-]
-
-if "page" not in st.session_state:
-    st.session_state["page"] = "Home"
 
 if "launched" not in st.session_state:
     st.session_state["launched"] = False
@@ -462,66 +422,47 @@ if "use_demo" not in st.session_state:
     st.session_state["use_demo"] = True
 
 
+# ============================================================
+# 8. SIDEBAR AND DATA SOURCE
+# ============================================================
+
 st.title("📦 DemandPilot AI")
 st.caption(
     "Intelligent Demand Forecasting & Inventory Optimization"
 )
 
 with st.sidebar:
-    st.markdown("## 🧭 Navigation")
-
-    current_page = st.session_state["page"]
-
-    selected_page = st.radio(
-        "Dashboard",
-        PAGES,
-        index=PAGES.index(current_page),
+    st.markdown("## 🧭 Dashboard Guide")
+    st.caption(
+        "All dashboards appear on one page. Scroll down to explore."
     )
 
-    if selected_page != st.session_state["page"]:
-        st.session_state["page"] = selected_page
-        st.session_state["launched"] = (
-            selected_page != "Home"
-        )
-        st.rerun()
-
     st.divider()
-
-    st.markdown("### 📁 Data source")
+    st.markdown("### 📁 Data Source")
 
     uploaded_file = st.file_uploader(
         "Upload your dataset",
         type=["csv", "xlsx", "xls"],
-        help=(
-            "Required fields for forecasting: date, "
-            "product ID, and units sold."
-        ),
+        help="Required fields: date, product ID, and units sold.",
     )
 
     use_demo = st.checkbox(
         "Use bundled demo dataset",
         value=st.session_state["use_demo"],
-        help="Used when no uploaded file is selected.",
     )
 
     st.session_state["use_demo"] = use_demo
 
     st.divider()
-
-    st.caption("Project status")
-    st.caption("Week 1–3 analytics modules retained")
+    st.caption("Project: DemandPilot AI")
 
 
 # ============================================================
-# 8. LANDING PAGE DISPLAY
+# 9. LANDING PAGE DISPLAY
 # ============================================================
 
-# Show the landing page until the user launches analytics.
-# If a file is uploaded while on Home, allow the user to
-# continue into the data configuration screen.
 if (
-    st.session_state["page"] == "Home"
-    and not st.session_state["launched"]
+    not st.session_state["launched"]
     and uploaded_file is None
 ):
     render_landing_page()
@@ -529,7 +470,7 @@ if (
 
 
 # ============================================================
-# 9. LOAD THE SELECTED DATA SOURCE
+# 10. LOAD DATA
 # ============================================================
 
 try:
@@ -556,24 +497,16 @@ if raw_data.empty:
     st.error("The selected dataset contains no rows.")
     st.stop()
 
-
 st.caption(f"**Current data source:** {source_label}")
 
 
 # ============================================================
-# 10. OPTIONAL AUTO MAPPING AND MANUAL MAPPING
+# 11. AUTO MAPPING AND MANUAL MAPPING
 # ============================================================
 
-st.subheader("1. Configure your data")
-
-st.caption(
-    "Choose whether to enable Auto Mapping after uploading. "
-    "You can review and change every suggested mapping."
-)
+st.header("⚙️ Configure Your Data")
 
 if uploaded_file is not None:
-    # Each uploaded filename has its own toggle state.
-    # New filenames start with Auto Mapping disabled.
     upload_key = (
         str(uploaded_file.name)
         .replace(".", "_")
@@ -584,29 +517,10 @@ if uploaded_file is not None:
         "✨ Enable Auto Mapping",
         value=False,
         key=f"auto_mapping_{upload_key}",
-        help=(
-            "OFF: select columns manually. "
-            "ON: suggest matches based on column names."
-        ),
     )
-
-    if auto_mapping_enabled:
-        st.success(
-            "Auto Mapping is ON. Review the suggested columns below."
-        )
-    else:
-        st.info(
-            "Auto Mapping is OFF. Select the source columns manually."
-        )
-
 else:
-    # The included demo dataset has known column names.
     auto_mapping_enabled = True
-
-    st.info(
-        "Demo mode uses automatic matching for the bundled dataset. "
-        "Upload your own file to control the Auto Mapping toggle."
-    )
+    st.info("Automatic mapping is enabled for the demo dataset.")
 
 
 mapping = {}
@@ -620,7 +534,6 @@ with st.expander(
 
         if auto_mapping_enabled:
             suggested = suggest_column(raw_data.columns, field)
-
             default_index = (
                 options.index(suggested)
                 if suggested in raw_data.columns
@@ -645,7 +558,7 @@ with st.expander(
             None if selected == "(Not mapped)" else selected
         )
 
-    st.caption("* Required for demand forecasting.")
+    st.caption("* Required fields")
 
 
 mapped_data = map_columns(raw_data, mapping)
@@ -665,7 +578,7 @@ if missing_required:
 
 
 # ============================================================
-# 11. VALIDATE AND PREPARE THE WORKING DATA
+# 12. VALIDATE AND CLEAN DATA
 # ============================================================
 
 quality = validate_data(mapped_data)
@@ -676,7 +589,6 @@ except Exception as exc:
     st.error(f"Could not prepare the data: {exc}")
     st.stop()
 
-
 if clean_data.empty:
     st.error(
         "No valid demand rows remain after cleaning. "
@@ -684,73 +596,62 @@ if clean_data.empty:
     )
     st.stop()
 
+st.success(
+    f"Dataset ready: {len(clean_data):,} cleaned records."
+)
+
 
 # ============================================================
-# 12. DEMAND OVERVIEW DASHBOARD
+# 13. DASHBOARD 1 — DEMAND OVERVIEW
 # ============================================================
 
-if st.session_state["page"] == "Demand Overview":
-    st.header("📈 Demand Overview")
+st.divider()
+st.header("📈 1. Demand Overview")
 
-    st.write(
-        "Explore historical demand by product and identify "
-        "patterns in your available data."
-    )
+st.write(
+    "Explore historical demand, product performance, "
+    "and daily demand patterns."
+)
 
-    products = sorted(
-        clean_data["product_id"].astype(str).unique().tolist()
-    )
+products = sorted(
+    clean_data["product_id"].astype(str).unique().tolist()
+)
 
-    selected_products = st.multiselect(
-        "Filter products",
-        products,
-        default=products,
-    )
+selected_products = st.multiselect(
+    "Filter products in Demand Overview",
+    products,
+    default=products,
+    key="overview_product_filter",
+)
 
-    view = clean_data[
-        clean_data["product_id"].astype(str).isin(selected_products)
-    ].copy()
+view = clean_data[
+    clean_data["product_id"].astype(str).isin(selected_products)
+].copy()
 
-    if view.empty:
-        st.warning("Select at least one product.")
-        st.stop()
-
-    total_demand = view["units_sold"].sum()
-
+if view.empty:
+    st.warning("Select at least one product.")
+else:
     daily_totals = view.groupby(
         "date", as_index=False
     )["units_sold"].sum()
 
+    total_demand = view["units_sold"].sum()
     average_daily_demand = daily_totals["units_sold"].mean()
 
     m1, m2, m3, m4 = st.columns(4)
 
-    m1.metric(
-        "Total demand",
-        f"{total_demand:,.0f} units",
-    )
-
-    m2.metric(
-        "Products",
-        f"{view['product_id'].nunique():,}",
-    )
-
+    m1.metric("Total Demand", f"{total_demand:,.0f} units")
+    m2.metric("Products", f"{view['product_id'].nunique():,}")
     m3.metric(
-        "Average daily demand",
+        "Average Daily Demand",
         f"{average_daily_demand:,.1f}",
     )
-
-    m4.metric(
-        "Valid daily records",
-        f"{len(view):,}",
-    )
-
-    st.divider()
+    m4.metric("Product-Date Records", f"{len(view):,}")
 
     left, right = st.columns(2)
 
     with left:
-        st.subheader("Daily demand trend")
+        st.subheader("Daily Demand Trend")
 
         st.plotly_chart(
             px.line(
@@ -758,10 +659,10 @@ if st.session_state["page"] == "Demand Overview":
                 x="date",
                 y="units_sold",
                 markers=True,
-                title="Total daily demand",
+                title="Total Daily Demand",
                 labels={
                     "date": "Date",
-                    "units_sold": "Units sold",
+                    "units_sold": "Units Sold",
                 },
                 template="plotly_dark",
             ),
@@ -769,7 +670,7 @@ if st.session_state["page"] == "Demand Overview":
         )
 
     with right:
-        st.subheader("Demand by product")
+        st.subheader("Demand by Product")
 
         product_totals = view.groupby(
             "product_id", as_index=False
@@ -780,156 +681,300 @@ if st.session_state["page"] == "Demand Overview":
                 product_totals,
                 x="product_id",
                 y="units_sold",
-                title="Total units by product",
+                title="Total Demand by Product",
                 labels={
                     "product_id": "Product",
-                    "units_sold": "Units sold",
+                    "units_sold": "Units Sold",
                 },
                 template="plotly_dark",
             ),
             width="stretch",
         )
 
-    st.subheader("Historical data preview")
+    st.subheader("Historical Demand Data")
+    st.dataframe(view, width="stretch", hide_index=True)
 
-    st.dataframe(
-        view,
-        width="stretch",
-        hide_index=True,
+
+# ============================================================
+# 14. DASHBOARD 2 — DEMAND FORECASTING
+# ============================================================
+
+st.divider()
+st.header("📊 2. Demand Forecasting")
+
+st.write(
+    "Examine historical demand patterns that can be used "
+    "as input for future forecasting."
+)
+
+forecast_daily = clean_data.groupby(
+    "date", as_index=False
+)["units_sold"].sum()
+
+st.plotly_chart(
+    px.line(
+        forecast_daily,
+        x="date",
+        y="units_sold",
+        markers=True,
+        title="Historical Demand for Forecasting",
+        labels={
+            "date": "Date",
+            "units_sold": "Units Sold",
+        },
+        template="plotly_dark",
+    ),
+    width="stretch",
+)
+
+st.subheader("Daily Historical Demand")
+st.dataframe(
+    forecast_daily,
+    width="stretch",
+    hide_index=True,
+)
+
+st.info(
+    "This section currently displays historical demand. "
+    "Future predictions will appear after your forecasting "
+    "module is connected."
+)
+
+
+# ============================================================
+# 15. DASHBOARD 3 — INVENTORY INTELLIGENCE
+# ============================================================
+
+st.divider()
+st.header("📦 3. Inventory Intelligence")
+
+st.write(
+    "Review demand by product to support inventory planning."
+)
+
+inventory_summary = clean_data.groupby(
+    "product_id", as_index=False
+).agg(
+    total_demand=("units_sold", "sum"),
+    average_record_demand=("units_sold", "mean"),
+    demand_records=("units_sold", "count"),
+).sort_values("total_demand", ascending=False)
+
+st.plotly_chart(
+    px.bar(
+        inventory_summary,
+        x="product_id",
+        y="total_demand",
+        title="Product Demand for Inventory Planning",
+        labels={
+            "product_id": "Product",
+            "total_demand": "Total Demand",
+        },
+        template="plotly_dark",
+    ),
+    width="stretch",
+)
+
+st.subheader("Inventory Planning Data")
+st.dataframe(
+    inventory_summary,
+    width="stretch",
+    hide_index=True,
+)
+
+st.info(
+    "Safety stock, reorder points, and stockout risk are not "
+    "calculated yet. These require inventory inputs and "
+    "connected inventory calculation logic."
+)
+
+
+# ============================================================
+# 16. DASHBOARD 4 — MODEL PERFORMANCE
+# ============================================================
+
+st.divider()
+st.header("🎯 4. Model Performance")
+
+st.write(
+    "This section will report how accurately a forecasting "
+    "model predicts demand."
+)
+
+st.info(
+    "Connect your model evaluation module to show real metrics "
+    "such as MAE and RMSE. No performance scores are invented."
+)
+
+
+# ============================================================
+# 17. DASHBOARD 5 — DATA QUALITY AND INSIGHTS
+# ============================================================
+
+st.divider()
+st.header("🔍 5. Data Quality & Insights")
+
+c1, c2, c3 = st.columns(3)
+
+c1.metric("Original Rows", f"{len(raw_data):,}")
+c2.metric("Mapped Rows", f"{len(mapped_data):,}")
+c3.metric("Cleaned Rows", f"{len(clean_data):,}")
+
+st.subheader("Validation Results")
+
+st.dataframe(
+    quality,
+    width="stretch",
+    hide_index=True,
+)
+
+st.subheader("Cleaned Demand Dataset")
+
+st.dataframe(
+    clean_data,
+    width="stretch",
+    hide_index=True,
+)
+
+
+# ============================================================
+# 18. DEMANDPILOT AI CHATBOT
+# ============================================================
+
+st.divider()
+st.header("🤖 DemandPilot AI Assistant")
+
+try:
+    from chatbot import render_demandpilot_chatbot
+
+    render_demandpilot_chatbot(clean_data)
+
+except ImportError as exc:
+    st.warning(
+        "The chatbot could not be imported. Check that chatbot.py "
+        "exists and its required packages are installed."
     )
+    st.caption(str(exc))
+
+
+# ============================================================
+# 19. DOWNLOAD ALL DASHBOARD DATA
+# ============================================================
+
+st.divider()
+st.header("📥 Download All Dashboard Data")
+
+st.write(
+    "Export your source data, cleaned data, quality report, "
+    "and demand summaries into one Excel workbook."
+)
+
+
+def create_dashboard_excel():
+    """Create an Excel workbook with all currently available data."""
+
+    output = BytesIO()
+
+    product_summary = clean_data.groupby(
+        "product_id", as_index=False
+    ).agg(
+        total_demand=("units_sold", "sum"),
+        average_record_demand=("units_sold", "mean"),
+        demand_records=("units_sold", "count"),
+    ).sort_values("total_demand", ascending=False)
+
+    daily_summary = clean_data.groupby(
+        "date", as_index=False
+    )["units_sold"].sum()
+
+    monthly_data = clean_data.copy()
+    monthly_data["month"] = (
+        pd.to_datetime(monthly_data["date"])
+        .dt.to_period("M")
+        .astype(str)
+    )
+
+    monthly_summary = monthly_data.groupby(
+        "month", as_index=False
+    )["units_sold"].sum()
+
+    with pd.ExcelWriter(
+        output,
+        engine="openpyxl",
+    ) as writer:
+
+        raw_data.to_excel(
+            writer,
+            sheet_name="Original Data",
+            index=False,
+        )
+
+        mapped_data.to_excel(
+            writer,
+            sheet_name="Mapped Data",
+            index=False,
+        )
+
+        clean_data.to_excel(
+            writer,
+            sheet_name="Cleaned Data",
+            index=False,
+        )
+
+        quality.to_excel(
+            writer,
+            sheet_name="Data Quality",
+            index=False,
+        )
+
+        product_summary.to_excel(
+            writer,
+            sheet_name="Product Summary",
+            index=False,
+        )
+
+        daily_summary.to_excel(
+            writer,
+            sheet_name="Daily Demand",
+            index=False,
+        )
+
+        monthly_summary.to_excel(
+            writer,
+            sheet_name="Monthly Demand",
+            index=False,
+        )
+
+    output.seek(0)
+    return output.getvalue()
+
+
+try:
+    excel_bytes = create_dashboard_excel()
 
     st.download_button(
-        "⬇️ Download cleaned demand CSV",
-        data=view.to_csv(index=False).encode("utf-8"),
-        file_name="cleaned_demand_data.csv",
-        mime="text/csv",
-    )
-
-
-# ============================================================
-# 13. DATA QUALITY AND INSIGHTS
-# ============================================================
-
-elif st.session_state["page"] == "Data Quality & Insights":
-    st.header("🔍 Data Quality & Insights")
-
-    st.write(
-        "Review data-quality checks before using the dataset "
-        "for forecasting or inventory calculations."
-    )
-
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric("Uploaded rows", f"{len(raw_data):,}")
-    c2.metric("Mapped rows", f"{len(mapped_data):,}")
-    c3.metric(
-        "Cleaned rows",
-        f"{len(clean_data):,}",
-    )
-
-    st.divider()
-
-    st.subheader("Validation results")
-
-    st.dataframe(
-        quality,
+        label="📥 Download All Dashboard Data (Excel)",
+        data=excel_bytes,
+        file_name="DemandPilot_All_Dashboard_Data.xlsx",
+        mime=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+        type="primary",
         width="stretch",
-        hide_index=True,
-    )
-
-    st.subheader("Cleaned demand data")
-
-    st.dataframe(
-        clean_data,
-        width="stretch",
-        hide_index=True,
-    )
-
-    st.download_button(
-        "⬇️ Download cleaned data",
-        data=clean_data.to_csv(index=False).encode("utf-8"),
-        file_name="cleaned_demand_data.csv",
-        mime="text/csv",
-    )
-
-    st.download_button(
-        "⬇️ Download quality report",
-        data=quality.to_csv(index=False).encode("utf-8"),
-        file_name="data_quality_report.csv",
-        mime="text/csv",
-    )
-
-
-# ============================================================
-# 14. OTHER DASHBOARD PAGES
-# ============================================================
-
-elif st.session_state["page"] == "Demand Forecasting":
-    st.header("📊 Demand Forecasting")
-
-    st.info(
-        "This page is ready for integration with your existing "
-        "src/forecasting.py and src/predict_future_demand.py modules. "
-        "The forecasting results will be connected in the next step."
-    )
-
-    st.subheader("Available historical data")
-    st.dataframe(
-        clean_data.head(50),
-        width="stretch",
-        hide_index=True,
-    )
-
-
-elif st.session_state["page"] == "Inventory Intelligence":
-    st.header("📦 Inventory Intelligence")
-
-    st.info(
-        "Your existing inventory calculations will be connected "
-        "here. Recommendations require inventory inputs such as "
-        "current stock and lead time. Demo inventory inputs must "
-        "be treated as examples."
-    )
-
-    st.subheader("Available products")
-    st.dataframe(
-        pd.DataFrame({
-            "product_id": sorted(
-                clean_data["product_id"].astype(str).unique()
-            )
-        }),
-        width="stretch",
-        hide_index=True,
-    )
-
-
-elif st.session_state["page"] == "Model Performance":
-    st.header("🎯 Model Performance")
-
-    st.info(
-        "This page will display the actual evaluation results "
-        "generated by your existing model-comparison module."
     )
 
     st.caption(
-        "Metrics will be calculated from evaluation results; "
-        "no model performance scores are fabricated."
+        "The workbook contains seven sheets: Original Data, "
+        "Mapped Data, Cleaned Data, Data Quality, Product Summary, "
+        "Daily Demand, and Monthly Demand."
     )
 
+except Exception as exc:
+    st.error(f"Could not prepare the Excel workbook: {exc}")
 
-elif st.session_state["page"] == "Home":
-    st.header("Welcome to DemandPilot AI")
+st.divider()
 
-    st.write(
-        "Your dataset is loaded. Choose a dashboard page "
-        "from the sidebar to continue."
-    )
-
-    st.dataframe(
-        clean_data.head(20),
-        width="stretch",
-        hide_index=True,
-    )
-from chatbot import render_demandpilot_chatbot
-
-render_demandpilot_chatbot()
+st.caption(
+    "DemandPilot AI | Demand Forecasting & Inventory Optimization"
+)
