@@ -930,3 +930,6 @@ elif st.session_state["page"] == "Home":
         width="stretch",
         hide_index=True,
     )
+from chatbot import render_demandpilot_chatbot
+
+render_demandpilot_chatbot()

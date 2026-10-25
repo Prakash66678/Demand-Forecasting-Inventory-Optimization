@@ -10,3 +10,4 @@ fastapi
 uvicorn
 pytest
 jupyter
+google-genai
