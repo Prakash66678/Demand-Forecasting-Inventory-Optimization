@@ -11,3 +11,5 @@ uvicorn
 pytest
 jupyter
 google-genai
+
+openpyxl
