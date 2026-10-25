@@ -1,0 +1,4 @@
+product_id,current_stock,on_order,backorders,inventory_position,lead_time_days,forecast_lead_time_demand,safety_stock,reorder_point,reorder_required,target_stock,suggested_order_quantity,selected_model,inventory_data_type
+P001,120,20,0,140,5,272.66,27,300,True,703,563,Holt-Winters,Sample inputs - replace with real data
+P002,80,0,5,75,7,288.13,26,315,True,604,529,Holt-Winters,Sample inputs - replace with real data
+P003,50,10,0,60,4,310.14,35,346,True,917,857,Holt-Winters,Sample inputs - replace with real data
